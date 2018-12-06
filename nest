@@ -1,0 +1,110 @@
+#!/usr/bin/python
+
+import sys
+import json
+import requests
+
+API_URL = 'https://developer-api.nest.com'
+THERMOSTATS_ENDPOINT = 'devices/thermostats'
+
+def update_local_cache():
+    global device_to_info
+    device_to_info = get_info(token)
+    global devices
+    devices = device_to_info.keys()
+    global therm_key
+    therm_key = devices[0]
+    global therm_info
+    therm_info = device_to_info[therm_key]
+    global structure_id
+    structure_id = therm_info['structure_id']
+
+def get_token():
+    with open('/Users/frank/.config/nest/token_cache') as f:
+        cache = json.loads(f.read())
+        if 'access_token' in cache:
+            return cache['access_token']
+        else: 
+            sys.exit('access_token key not present in ~/.config/nest/token_cache')
+
+def get_info(token):
+    url = "{api}/{thermostats}?auth={token}".format(
+        api=API_URL,
+        thermostats=THERMOSTATS_ENDPOINT,
+        token=token
+    )
+    resp = requests.get(url)
+    content = resp.content
+    parsed_content = json.loads(content)
+    return parsed_content
+
+def set_info(token, device, key, val):
+    url = "{api}/{thermostats}/{device}/{key}?auth={token}".format(
+        api=API_URL,
+        thermostats=THERMOSTATS_ENDPOINT,
+        device=device,
+        key=key,
+        token=token
+    )
+    val_data = json.dumps(val)
+    resp = requests.put(url, data=val_data)
+    content = resp.content
+    parsed_content = json.loads(content)
+    print parsed_content
+
+token = get_token()
+device_to_info = {}
+devices = []
+therm_key = ''
+therm_info = {}
+structure_id = ''
+
+update_local_cache()
+mode = therm_info['hvac_mode']
+target_temp = therm_info['target_temperature_f']
+curr_temp = therm_info['ambient_temperature_f']
+
+action = sys.argv[1]
+
+if action == "get":
+    print "mode={}\ncurr_temp={}\ntarget_temp={}".format(
+        therm_info['hvac_mode'],
+        therm_info['ambient_temperature_f'],
+        therm_info['target_temperature_f']
+    )
+elif action == "set":
+    new_temp = int(sys.argv[2])
+    mode_should_be = ''
+    if new_temp < curr_temp:
+        mode_should_be = 'cool'
+    elif new_temp > curr_temp:
+        mode_should_be = 'heat'
+    else:
+        sys.exit('> nothing to do, temperature already at the correct value ({})'.format(curr_temp))
+
+    if mode != mode_should_be:
+        print '> change hvac mode from {} to {}'.format(mode, mode_should_be)
+        set_info(token, therm_key, 'hvac_mode', mode_should_be)
+    
+    print "> set target temp to {}".format(new_temp)
+    set_info(token, therm_key, 'target_temperature_f', new_temp)
+
+    update_local_cache()
+
+    print "> time remaining: {}".format(therm_info['time_to_target_remaining'])
+
+elif action == "off":
+    mode_should_be = "off"
+    if mode != mode_should_be:
+        print '> change hvac mode from {} to {}'.format(mode, mode_should_be)
+        set_info(token, therm_key, 'hvac_mode', mode_should_be)
+    else:
+        sys.exit("> nothing to do, mode is already correct ({})".format(mode))
+
+elif action == "recon":
+    mode_should_be = "off"
+    if target_temp == curr_temp and mode != mode_should_be:
+        print '> change hvac mode from {} to {}'.format(mode, mode_should_be)
+        set_info(token, therm_key, 'hvac_mode', mode_should_be)
+    else:
+        sys.exit("> nothing to do, mode is already correct ({})".format(mode))
